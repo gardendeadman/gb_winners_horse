@@ -38,6 +38,8 @@ TRANSLATIONS_SRC = [
     "도주선행차입추입핸디캡연승",
     "은퇴까지년남았습니다밖에않았",
     "게이한큐탈퇴특팬솜쇼쿠큐프피",
+    # 코스 설명 (새 문자)
+    "평탄해직긴파워반너좌회내모안쪽유",
 ]
 
 all_chars = set()
@@ -57,6 +59,8 @@ def encode_kr(text: str) -> bytes:
             if idx is None:
                 raise ValueError(f"문자 '{ch}'이 문자 집합에 없음")
             result.append(KOREAN_BYTE_BASE + idx)
+        elif ch == ' ':
+            result.append(0x20)
     return bytes(result)
 
 def center_pad(content: bytes, width: int, pad_byte: int = 0x20) -> bytes:
@@ -178,6 +182,20 @@ PATCH_TABLE = [
     (0x1E9AA, "은퇴까지년남았습니다",     'var'),
     (0x1E9BA, "은퇴까지년남았습니다",     'var'),
     (0x1E9CA, "은퇴까지년밖에않았습니다", 'var'),
+    # 코스 설명 (뱅크 1 0x05E6F-0x060C9)
+    (0x05E6F, "이 삿포로 코스는 평탄해",                   'var'),
+    (0x05E91, "이 하코다테 코스는 평탄해",                 'var'),
+    (0x05EB3, "이 후쿠시마 코스는 평탄해",                 'var'),
+    (0x05ED4, "이 니가타 코스는 직선이 긴 코스야",         'var'),
+    (0x05F0F, "이 도쿄 코스는 스태미나 파워가 중요해",     'var'),
+    (0x05F49, "이 나카야마 코스는 스태미나 파워가 중요해", 'var'),
+    (0x05F86, "이 주쿄 코스는 후반 코너가 중요해 좌회전 코스야",   'var'),
+    (0x05FC9, "이 교토 코스는 후반 내리기가 중요해",       'var'),
+    (0x05FFD, "이 한신 코스는 평탄해도 모양이 특이해",     'var'),
+    (0x06045, "이 고쿠라 코스는 평탄해 안쪽이 유리해",     'var'),
+    (0x06089, "잔디 코스는 평탄해",                        'var'),
+    (0x060A9, "잔디 코스는 평탄해",                        'var'),
+    (0x060C9, "이 특별 코스는 장거리야 스태미나 중요해",   'var'),
 ]
 
 def patch_string(rom: bytearray, offset: int, korean_text: str, slot_type: str):
