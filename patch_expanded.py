@@ -48,17 +48,20 @@ for text in TRANSLATIONS_SRC:
         if '가' <= ch <= '힣':
             all_chars.add(ch)
 KOREAN_CHARS = sorted(all_chars)
-CHAR_TO_IDX = {ch: i for i, ch in enumerate(KOREAN_CHARS)}
-KOREAN_BYTE_BASE = 0x21   # 한글 문자 i → ROM 바이트 값 0x21 + i
+
+# 보존 바이트: expand_rom.py 와 동일 (숫자·공백·구두점 타일 유지)
+PRESERVED = set(list(range(0x30, 0x3A)) + [0x20, 0x2C, 0x3C, 0x3F])
+available_positions = [b for b in range(0x21, 0x100) if b not in PRESERVED]
+CHAR_TO_BYTE = {ch: available_positions[i] for i, ch in enumerate(KOREAN_CHARS)}
 
 def encode_kr(text: str) -> bytes:
     result = []
     for ch in text:
         if '가' <= ch <= '힣':
-            idx = CHAR_TO_IDX.get(ch)
-            if idx is None:
+            b = CHAR_TO_BYTE.get(ch)
+            if b is None:
                 raise ValueError(f"문자 '{ch}'이 문자 집합에 없음")
-            result.append(KOREAN_BYTE_BASE + idx)
+            result.append(b)
         elif ch == ' ':
             result.append(0x20)
     return bytes(result)
@@ -286,21 +289,18 @@ def main():
     print("\n=== 검증 ===")
     print(f"  bank 전환: file 0x160A = 0x{rom[0x160A]:02X}  (08 = bank8)")
     print(f"  텍스트렌더러: {bytes(rom[0x15C6:0x15C8]).hex()}  (18 1C = JR +28)")
-    bank8_kr0 = 0x20090 + 0x21 * 8
-    print(f"  bank8 한글[가,0x21] 타일 (file 0x{bank8_kr0:05X}): "
-          f"{bytes(rom[bank8_kr0:bank8_kr0+8]).hex()}")
-    bank8_sp = 0x20090 + 0x20 * 8
-    print(f"  bank8 space[0x20] 타일 (file 0x{bank8_sp:05X}): "
-          f"{bytes(rom[bank8_sp:bank8_sp+8]).hex()}")
-    print(f"  bank4 원본 보존: {bytes(rom[0x10090:0x10098]).hex()}")
+    print(f"  숫자 타일 보존 확인:")
+    for digit in range(10):
+        b = 0x30 + digit
+        bank8_off = 0x20090 + b * 8
+        tile = bytes(rom[bank8_off:bank8_off+8]).hex()
+        print(f"    '{digit}' (0x{b:02X}): {tile}")
     print(f"\n  한글 인코딩 예시:")
-    for ch in ['가', '사', '한', '글']:
-        if ch in CHAR_TO_IDX:
-            b = KOREAN_BYTE_BASE + CHAR_TO_IDX[ch]
-            vram = 0x9000 + (b if b < 0x80 else b - 0x100) * 16
+    for ch in ['가', '사', '한', '글', '코', '스']:
+        if ch in CHAR_TO_BYTE:
+            b = CHAR_TO_BYTE[ch]
             bank8_off = 0x20090 + b * 8
-            print(f"    '{ch}' → byte 0x{b:02X} → VRAM ${vram:04X} "
-                  f"← bank8 file 0x{bank8_off:05X}")
+            print(f"    '{ch}' → byte 0x{b:02X} ← bank8 file 0x{bank8_off:05X}")
 
 
 if __name__ == '__main__':

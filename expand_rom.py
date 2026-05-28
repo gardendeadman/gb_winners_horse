@@ -78,7 +78,7 @@ BANK4_TILE_START = 0x10090   # file: bank4 CPU $4090
 BANK8_TILE_START = 0x20090   # file: bank8 CPU $4090 (bank8 = file 0x20000)
 TILE_AREA_SIZE   = 256 * 8   # 모든 byte 값(0-255) 커버, 8 bytes/tile = 2048 bytes
 
-# 단계 1: 뱅크 4 타일 영역 → 뱅크 8에 복사 (space, 숫자 등 비한글 문자 유지)
+# 단계 1: 뱅크 4 타일 영역 → 뱅크 8에 복사 (모든 원본 타일 보존)
 rom[BANK8_TILE_START : BANK8_TILE_START + TILE_AREA_SIZE] = \
     rom[BANK4_TILE_START : BANK4_TILE_START + TILE_AREA_SIZE]
 print(f"\n[뱅크 8] bank4 타일 영역 복사:")
@@ -104,23 +104,31 @@ def tile_16_to_8(tile_16: bytes) -> bytes:
         result.append(lo | hi)
     return bytes(result)
 
-# 단계 3: 한글 타일을 뱅크 8의 해당 슬롯에 배치
-KOREAN_BYTE_BASE = 0x21  # '가'(idx 0) = byte 0x21
+# 보존 바이트: 게임이 실제로 사용하는 타일 (숫자, 공백, 구두점)
+# 이 위치에는 한글 타일을 덮어쓰지 않고 bank4 원본 유지
+PRESERVED = set(list(range(0x30, 0x3A)) + [0x20, 0x2C, 0x3C, 0x3F])
+
+# 한글 타일 배치 가능한 바이트 슬롯 (오름차순, $21부터 $FF까지, 보존 제외)
+available_positions = [b for b in range(0x21, 0x100) if b not in PRESERVED]
+assert len(available_positions) >= NUM_TILES, \
+    f"사용 가능 슬롯 {len(available_positions)} < 필요 타일 {NUM_TILES}"
+
+# 단계 3: 한글 타일을 뱅크 8의 해당 슬롯에 배치 (보존 위치 건너뜀)
 placed = 0
 for i, ch in enumerate(KOREAN_CHARS):
-    byte_val = KOREAN_BYTE_BASE + i   # 0x21 ~ 0xCD
+    byte_val = available_positions[i]
     tile_16  = tile_data_16[i*16 : i*16+16]
     tile_8   = tile_16_to_8(tile_16)
-
-    # 뱅크 8 파일 오프셋: 0x20000 + ($4090 + byte_val*8 - $4000)
-    file_offset = BANK8_TILE_START + byte_val * 8   # = 0x20090 + byte_val*8
+    file_offset = BANK8_TILE_START + byte_val * 8
     rom[file_offset : file_offset + 8] = tile_8
     placed += 1
 
+first_byte = available_positions[0]
+last_byte  = available_positions[NUM_TILES - 1]
 print(f"\n[뱅크 8] 한글 타일 {placed}개 배치 (8byte/tile 포맷):")
-print(f"  바이트 0x{KOREAN_BYTE_BASE:02X}-0x{KOREAN_BYTE_BASE+NUM_TILES-1:02X}"
-      f" → file 0x{BANK8_TILE_START + KOREAN_BYTE_BASE*8:05X}"
-      f"-0x{BANK8_TILE_START + (KOREAN_BYTE_BASE+NUM_TILES-1)*8 + 7:05X}")
+print(f"  바이트 범위: 0x{first_byte:02X}~0x{last_byte:02X} "
+      f"(보존 슬롯 {sorted(PRESERVED)} 건너뜀)")
+print(f"  $30-$39 숫자 타일 보존 확인 (bank4→bank8 유지)")
 print(f"  공식: file 0x20090 + byte_val×8 (= bank8 CPU $4090 + byte_val×8)")
 
 # ── 헤더 업데이트 ────────────────────────────────────────────────────────────
@@ -148,14 +156,16 @@ print(f"\n✓ 출력: {ROM_OUT} ({len(rom)//1024}KB)")
 
 # 검증
 print("\n=== 검증 ===")
-print(f"bank4 타일 영역 보존: {bytes(rom[0x10090:0x10098]).hex()}")
-print(f"bank8 space(0x20) 타일 (file 0x{0x20090+0x20*8:05X}): "
-      f"{bytes(rom[0x20090+0x20*8 : 0x20090+0x20*8+8]).hex()}")
-print(f"bank4 space(0x20) 타일 (file 0x{0x10090+0x20*8:05X}): "
-      f"{bytes(rom[0x10090+0x20*8 : 0x10090+0x20*8+8]).hex()}")
-kr0_off = BANK8_TILE_START + KOREAN_BYTE_BASE * 8
-print(f"bank8 한글[0](가, 0x21) 타일 (file 0x{kr0_off:05X}): "
+print(f"bank4 타일 영역 불변: {bytes(rom[0x10090:0x10098]).hex()}")
+# 숫자 타일 보존 확인
+for digit in range(10):
+    b = 0x30 + digit
+    b4 = bytes(rom[0x10090+b*8 : 0x10090+b*8+8]).hex()
+    b8 = bytes(rom[0x20090+b*8 : 0x20090+b*8+8]).hex()
+    match = "OK" if b4 == b8 else "MISMATCH!"
+    print(f"  숫자 '{digit}' (0x{b:02X}): bank4={b4}  bank8={b8}  [{match}]")
+# 한글 첫 번째 타일 확인
+b0 = available_positions[0]
+kr0_off = BANK8_TILE_START + b0 * 8
+print(f"bank8 한글[0]('{KOREAN_CHARS[0]}', 0x{b0:02X}) 타일: "
       f"{bytes(rom[kr0_off:kr0_off+8]).hex()}")
-print(f"bank4 원본 0x21 슬롯 (file 0x{0x10090+0x21*8:05X}): "
-      f"{bytes(rom[0x10090+0x21*8 : 0x10090+0x21*8+8]).hex()}")
-print(f"bank4 원본 불변 확인: {bytes(rom[0x10090:0x10098]) == bytes(orig[0x10090:0x10098])}")
