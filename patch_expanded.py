@@ -40,6 +40,8 @@ TRANSLATIONS_SRC = [
     "게이한큐탈퇴특팬솜쇼쿠큐프피",
     # 코스 설명 (새 문자)
     "평탄해직긴파워반너좌회내모안쪽유",
+    # 추가 번역 (14 신규 문자)
+    "레이스의이번주일후늘출할합있능력뉴돌처단",
 ]
 
 all_chars = set()
@@ -54,7 +56,9 @@ PRESERVED = set(list(range(0x30, 0x3A)) + [0x20, 0x2C, 0x3C, 0x3F])
 available_positions = [b for b in range(0x21, 0x100) if b not in PRESERVED]
 CHAR_TO_BYTE = {ch: available_positions[i] for i, ch in enumerate(KOREAN_CHARS)}
 
-def encode_kr(text: str) -> bytes:
+def encode_kr(text) -> bytes:
+    if isinstance(text, (bytes, bytearray)):
+        return bytes(text)
     result = []
     for ch in text:
         if '가' <= ch <= '힣':
@@ -62,8 +66,11 @@ def encode_kr(text: str) -> bytes:
             if b is None:
                 raise ValueError(f"문자 '{ch}'이 문자 집합에 없음")
             result.append(b)
-        elif ch == ' ':
-            result.append(0x20)
+        elif ch == ' ':  result.append(0x20)
+        elif ch == '\n': result.append(0x02)
+        elif ch == '\x01': result.append(0x01)
+        elif ch == '\x03': result.append(0x03)
+        elif '0' <= ch <= '9': result.append(ord(ch))
     return bytes(result)
 
 def center_pad(content: bytes, width: int, pad_byte: int = 0x20) -> bytes:
@@ -185,6 +192,54 @@ PATCH_TABLE = [
     (0x1E9AA, "은퇴까지년남았습니다",     'var'),
     (0x1E9BA, "은퇴까지년남았습니다",     'var'),
     (0x1E9CA, "은퇴까지년밖에않았습니다", 'var'),
+    # 레이스 스케줄 (뱅크 1)
+    (0x05724, "\x03의\n레이스",              'multiline'),
+    (0x0572B, "\x03이번주의\n레이스",         'multiline'),
+    (0x05737, "\x031주일후의\n레이스",        'multiline'),
+    (0x05746, "\x032주일후의\n레이스",        'multiline'),
+    (0x05755, "\x033주일후의\n레이스",        'multiline'),
+    (0x05768, "\x03은더이상없습니다",         'multiline'),
+    # 트라이얼 경주명 (뱅크 1)
+    (0x0579B, "\x03사쓰키상\n 트라이얼",     'multiline'),
+    (0x057AA, "\x03천황상\n 트라이얼",       'multiline'),
+    (0x057C8, "\x03야스다기념\n 트라이얼",   'multiline'),
+    (0x057D8, "\x03국화상\n 트라이얼",       'multiline'),
+    # 능력 파라미터 (뱅크 1) ─ 스태미나/스피드/파워/대시 레이블
+    (0x06151, "\x03에는\x01\x03    자신감 있습니다\x01\x01\x01"
+              "\x03        능력\n파라미터\x01"
+              "\n스태미나   8 스피드 20\x01"
+              "\n파워   6 대시   6",          'multiline'),
+    (0x061DA, "\x03가 있어\x01"
+              "\x03        능력\n파라미터\x01"
+              "\n스태미나   8 스피드  6\x01"
+              "\n파워  20 대시   6",          'multiline'),
+    (0x06280, "\x03        능력\n파라미터\x01"
+              "\n스태미나  10 스피드 10\x01"
+              "\n파워  10 대시  10",          'multiline'),
+    (0x06303, "\x03        능력\n파라미터\x01"
+              "\n스태미나  20 스피드  8\x01"
+              "\n파워   6 대시   6",          'multiline'),
+    (0x0635F, "\x03        능력\n파라미터\x01"
+              "\n스태미나   8 스피드  6\x01"
+              "\n파워   6 대시  20",          'multiline'),
+    (0x0640A, "\x03        능력\n파라미터\x01"
+              "\n스태미나  20 스피드  6\x01"
+              "\n파워   8 대시   8",          'multiline'),
+    # 출전/퇴장 메시지 (뱅크 1)
+    (0x06657, "\x03오늘출전할수있는\n레이스\x03없습니다", 'multiline'),
+    (0x06675, "\x03더이상\n연습은\x03할수없습니다",        'multiline'),
+    (0x0668C, "\x03이\n레이스\x03에는\x01출전할수없습니다",'multiline'),
+    (0x066E1, "\x03에출전합니까?",            'multiline'),
+    (0x06708, "\x034주가됩니다",              'multiline'),
+    # 메뉴 (뱅크 1)
+    (0x069E3, "\x03처음부터\x01\x03이어하기", 'multiline'),
+    (0x06A30, "\x03돌아가기\x01\x03없음",     'multiline'),
+    (0x06AB8, "\x03이전\n메뉴\x03로돌아가기", 'multiline'),
+    # 뱅크 6 경주 타입
+    (0x183C5, "\x03신마전",                   'multiline'),
+    (0x184BF, "\x03미승리전",                 'multiline'),
+    (0x184D2, "\x03단파상",                   'multiline'),
+    (0x1859C, "\x03미승리전",                 'multiline'),
     # 코스 설명 (뱅크 1 0x05E6F-0x060C9)
     (0x05E6F, "이 삿포로 코스는 평탄해",                   'var'),
     (0x05E91, "이 하코다테 코스는 평탄해",                 'var'),
@@ -201,8 +256,21 @@ PATCH_TABLE = [
     (0x060C9, "이 특별 코스는 장거리야 스태미나 중요해",   'var'),
 ]
 
-def patch_string(rom: bytearray, offset: int, korean_text: str, slot_type: str):
+def patch_string(rom: bytearray, offset: int, korean_text, slot_type: str):
     encoded = encode_kr(korean_text)
+    if slot_type == 'multiline':
+        # 원본 길이 파악 후 인코딩 결과를 그대로 기록 (공백 패딩/잘라내기)
+        end = offset
+        while end < offset + 300 and rom[end] != 0x00:
+            end += 1
+        orig_len = end - offset
+        data = encoded
+        if len(data) < orig_len:
+            data += bytes([0x20] * (orig_len - len(data)))
+        else:
+            data = data[:orig_len]
+        rom[offset:offset + orig_len + 1] = data + bytes([0x00])
+        return data
     if slot_type == 'race22':
         body = center_pad(encoded, 20, 0x20)
         new_bytes = bytes([0x03]) + body + bytes([0x00])
