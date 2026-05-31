@@ -44,6 +44,8 @@ TRANSLATIONS_SRC = [
     "레이스의이번주일후늘출할합있능력뉴돌처단",
     # 트레이너 이름 + 대화 (4 신규 문자)
     "바무켄임",
+    # 메뉴 (1 신규 문자: 틀)
+    "타이틀로",
 ]
 
 all_chars = set()
@@ -70,8 +72,7 @@ def encode_kr(text) -> bytes:
             result.append(b)
         elif ch == ' ':  result.append(0x20)
         elif ch == '\n': result.append(0x02)
-        elif ch == '\x01': result.append(0x01)
-        elif ch == '\x03': result.append(0x03)
+        elif '\x01' <= ch <= '\x0f': result.append(ord(ch))  # control/runtime codes
         elif '0' <= ch <= '9': result.append(ord(ch))
     return bytes(result)
 
@@ -80,6 +81,96 @@ def center_pad(content: bytes, width: int, pad_byte: int = 0x20) -> bytes:
     left  = (width - len(content)) // 2
     right = width - len(content) - left
     return bytes([pad_byte] * left) + content + bytes([pad_byte] * right)
+
+def _build_data_select():
+    """0x0436D: 저장 선택 박스 (박스 그리기 타일 $60-$67 보존)"""
+    ek = encode_kr
+    row = lambda c: bytes([0x63]) + c + bytes([0x64, 0x01])
+    def slot(label_bytes, digit):
+        return bytes([0x20, 0x20]) + label_bytes + bytes([digit, 0x20, 0x20, 0x20])
+    lbl = ek("기록")  # 기,록 → 기록N = save slot label
+    return (bytes([0x03, 0x60]) + bytes([0x61]*7) + bytes([0x62, 0x01]) +
+            row(slot(lbl, 0x31)) + row(slot(lbl, 0x32)) +
+            row(slot(lbl, 0x33)) + row(slot(lbl, 0x34)) +
+            row(bytes([0x20, 0x20]) + ek("없음") + bytes([0x20]*4)) +
+            bytes([0x65]) + bytes([0x66]*8) + bytes([0x67]))
+DATA_SELECT_PATCH = _build_data_select()
+
+def _build_load_box():
+    """0x0429B: 불러오기 선택 박스 (147B): 03 60 61×18 62 + 5×row + footer"""
+    ek = encode_kr
+    top    = bytes([0x03, 0x60]) + bytes([0x61]*18) + bytes([0x62])
+    footer = bytes([0x01, 0x65]) + bytes([0x66]*18) + bytes([0x67])
+    def row(content):
+        return bytes([0x01, 0x63]) + content + bytes([0x64])
+    def data_slot(n):
+        return row(bytes([0x20]*3) + ek("기록") + bytes([0x30+n]) + bytes([0x20]*12))
+    cancel = row(bytes([0x20]*5) + ek("없음") + bytes([0x20]*11))
+    return top + data_slot(1) + data_slot(2) + data_slot(3) + data_slot(4) + cancel + footer
+LOAD_BOX_PATCH = _build_load_box()
+
+def _build_question_box():
+    """0x04341: 어느기록입니까? 질문 박스 (43B)"""
+    ek = encode_kr
+    text    = ek("어느기록입니까") + bytes([0x3F])  # 8B
+    content = bytes([0x20]*6) + text + bytes([0x20]*6)  # 20B
+    return (bytes([0x01, 0x03, 0x63]) + content +
+            bytes([0x64, 0x01, 0x65]) + bytes([0x66]*16) + bytes([0x67]))
+QUESTION_BOX_PATCH = _build_question_box()
+
+def _build_prize_block(preamble: bytes, size: int) -> bytes:
+    """레이스 결과 + 상금 표시 블록 (preamble + 상금행 + 전체상금행)"""
+    ek = encode_kr
+    prize1 = bytes([0x01, 0x03]) + ek("상금") + bytes([0x20]*6) + bytes([0x30, 0x68, 0x6C])
+    prize2 = bytes([0x01]) + ek("전체상금") + bytes([0x20]*2) + bytes([0x30, 0x68, 0x6C])
+    return preamble + prize1 + prize2
+
+ek = encode_kr
+_PRIZE_BASE_1 = _build_prize_block(
+    bytes([0x02, 0x20, 0x20, 0x20]) + ek("레이스") + bytes([0x03]) + ek("승리") + bytes([0x01, 0x01]), 45)
+_PRIZE_BASE_SPEED = _build_prize_block(
+    bytes([0x02]) + ek("스피드") + bytes([0x03]) + ek("대시능력") +
+    bytes([0x01]) + ek("있습니다") + bytes([0x01, 0x01]), 60)
+_PRIZE_BASE_STAMINA = _build_prize_block(
+    bytes([0x02]) + ek("스태미나") + bytes([0x03]) + ek("파워능력") +
+    bytes([0x01]) + ek("있습니다") + bytes([0x01, 0x01]), 57)
+
+def _build_stamina_max(leading_spaces: int) -> bytes:
+    ek = encode_kr
+    return (bytes([0x02]) + bytes([0x20]*leading_spaces) +
+            ek("스태미나") + bytes([0x03]) +
+            ek("최대입니다") + bytes([0x01, 0x02, 0x6E, 0x6F]))
+_STAMINA_MAX_1 = _build_stamina_max(4)   # 0x068D9 (25B slot)
+_STAMINA_MAX_2 = _build_stamina_max(2)   # 0x068F3 (24B slot)
+
+def _build_trainer_prize():
+    """0x0514A (29B): \x01 200000 [0x68][0x6C] \x03 대단합니다 \x01"""
+    return (bytes([0x01, 0x32, 0x30, 0x30, 0x30, 0x30, 0x30, 0x68, 0x6C, 0x03]) +
+            encode_kr("대단합니다") + bytes([0x01]))
+_TRAINER_PRIZE = _build_trainer_prize()
+
+def _build_weekly_stats():
+    """0x06970 (97B): 주간 성적 통계 블록"""
+    ek = encode_kr
+    r = bytearray()
+    # [0-12] 스태미나 라벨 + 게이지 바
+    r += bytes([0x01, 0x02]) + ek("스태미나") + bytes([0x20]*5) + bytes([0x08, 0x09])
+    # [13-28] 섹션 헤더 ($ = 런타임 값 마커)
+    r += bytes([0x01, 0x01, 0x03, 0x20, 0x20, 0x20, 0x20, 0x24])
+    r += ek("이번주성적") + bytes([0x20]*3)
+    # [29-41] Gy 행
+    r += bytes([0x01, 0x47, 0x79]) + bytes([0x20]*7) + ek("승") + bytes([0x20]*2)
+    # [42-54] Gz 행
+    r += bytes([0x01, 0x47, 0x7A]) + bytes([0x20]*7) + ek("승") + bytes([0x20]*2)
+    # [55-67] G{ 행
+    r += bytes([0x01, 0x47, 0x7B]) + bytes([0x20]*7) + ek("승") + bytes([0x20]*2)
+    # [68-82] 전체 섹션
+    r += bytes([0x01, 0x02]) + ek("전체") + bytes([0x20]*7) + bytes([0x03]) + ek("레이스")
+    # [83-96] 레이스 섹션
+    r += bytes([0x01]) + ek("레이스") + bytes([0x02]) + ek("레이스") + bytes([0x20]*3) + ek("레이스")
+    assert len(r) == 97, f"weekly stats size = {len(r)}"
+    return bytes(r)
+_WEEKLY_STATS = _build_weekly_stats()
 
 # ── 텍스트 패치 테이블 ────────────────────────────────────────────────────────
 PATCH_TABLE = [
@@ -268,6 +359,46 @@ PATCH_TABLE = [
     (0x06089, "잔디 코스는 평탄해",                        'var'),
     (0x060A9, "잔디 코스는 평탄해",                        'var'),
     (0x060C9, "이 특별 코스는 장거리야 스태미나 중요해",   'var'),
+    # 데이터 선택 박스 (뱅크 1)
+    (0x0436D, DATA_SELECT_PATCH, 'multiline'),
+    # 레이스/관전 서브메뉴 (뱅크 1)
+    (0x069D2, "\x02레이스하기\x01\x03관전하기",  'multiline'),
+    # 주간 메인 메뉴 7항목 (뱅크 1)
+    (0x069F3, "\x02레이스하기\x01\x02연습하기\x01\x03휴양하기\x01\x03마기록\x01\x02레이스일정\x01\x02타이틀로\x01\x03없음", 'multiline'),
+    # 트레이닝 선택 + 스탯 표시 (뱅크 1)
+    (0x06A40, "\x03자기연습\x01\x02 트레이너대행\x01\x01\x01\x02스태미나  \x08\x09\x01스피드    \x08\x09\x01파워      \x08\x09\x01대시      \x08\x09", 'multiline'),
+    # 능력치 항목 선택 (뱅크 1)
+    (0x06A88, "\x03어느항목을연습합니까\x01\x01 1  스태미나\x01 2  스피드\x01 3  파워\x01 4  대시", 'multiline'),
+    # 달력 주차 표시 (뱅크 1)
+    (0x06AC8, "\x03\x0b 주차", 'multiline'),
+    # 불러오기 선택 박스 (뱅크 1)
+    (0x0429B, LOAD_BOX_PATCH, 'multiline'),
+    # 어느 기록입니까? 질문 박스 (뱅크 1)
+    (0x04341, QUESTION_BOX_PATCH, 'multiline'),
+    # 레이스/트레이너 선택 프롬프트 (뱅크 1)
+    (0x066A6, "\x02\x03어느레이스입니까",       'multiline'),
+    (0x066B4, "\x03이능력치는\x01더이상오르지않습니다", 'multiline'),
+    (0x066CB, "\x02\x03어느트레이너입니까",      'multiline'),
+    (0x066F0, "\x02\x03어느레이스입니까",        'multiline'),
+    (0x06700, "\x02연습은\x034주가됩니다",       'multiline'),
+    (0x06715, "\x03이트레이너로는\x01안됩니다",  'multiline'),
+    # 레이스 결과 + 상금 표시 (뱅크 1)
+    (0x06752, _PRIZE_BASE_1,      'multiline'),
+    (0x067B0, _PRIZE_BASE_SPEED,  'multiline'),
+    (0x067ED, _PRIZE_BASE_STAMINA,'multiline'),
+    # 스태미나 최대 메시지 (뱅크 1)
+    (0x068D9, _STAMINA_MAX_1, 'multiline'),
+    (0x068F3, _STAMINA_MAX_2, 'multiline'),
+    # 트레이너 대화 (뱅크 1)
+    (0x050B4, "\x03긴레이스에는\x02스태미나가\x01중요합니다", 'multiline'),
+    (0x05112, "\x03대단합니다\x01여기까지\x01오다니",         'multiline'),
+    (0x0514A, _TRAINER_PRIZE, 'multiline'),
+    (0x05195, "\x03나는어느쪽입니까",                        'multiline'),
+    (0x052FB, "\x03대단합니다",                              'multiline'),
+    # 레이스 스타트 안내 (뱅크 1)
+    (0x0587B, "\x03스타트합니다\x01\x01이코스는\x03스태미나\x01주의하세요\x01\x01\x03레이스스타트", 'multiline'),
+    # 주간 성적 통계 (뱅크 1)
+    (0x06970, _WEEKLY_STATS, 'multiline'),
 ]
 
 def patch_string(rom: bytearray, offset: int, korean_text, slot_type: str):
