@@ -149,6 +149,19 @@ def _build_trainer_prize():
             encode_kr("대단합니다") + bytes([0x01]))
 _TRAINER_PRIZE = _build_trainer_prize()
 
+# 스피드 트레이너 설명 (0x0649B, 100B)
+_SPEED_TRAINER_DESC = encode_kr(
+    "\x02스피드연습합니다\x01단레이스에스피드중요합니다"
+    "\x01\x02나에게연습하세요\x03스피드4\x08\x09있습니다")
+
+# 트레이너 대화 20B 블록들
+_PRIZE_100K = bytes([0x31,0x30,0x30,0x30,0x30,0x30,0x68,0x6C]) + encode_kr("상금도전합니다")
+_PRIZE_50K  = bytes([0x35,0x30,0x30,0x30,0x30,0x68,0x6C])       + encode_kr("상금도전합니다")
+
+# 스태미나 회복 텍스트 (0x0688F 블록 내 텍스트 부분, 0x068C2부터 22B)
+_STAMINA_RECOVERY = (bytes([0x03]) + encode_kr("스태미나가늘었습니다")
+                     + bytes([0x01, 0x02, 0x6E, 0x6F]))
+
 def _build_weekly_stats():
     """0x06970 (97B): 주간 성적 통계 블록"""
     ek = encode_kr
@@ -405,6 +418,21 @@ PATCH_TABLE = [
     (0x0654E, "\x02대시연습합니다\x01대시능력이중요합니다\x01\x02나에게연습하세요\x03대시4\x08\x09있습니다", 'multiline'),
     (0x06594, "\x02전체능력연습합니다\x01\x02나에게연습하세요\x03전체능력\x011\x08\x09있습니다", 'multiline'),
     (0x065E3, "\x03나에게연습하세요\x01능력이늘어있습니다", 'multiline'),
+    # 스피드 트레이너 설명 (0x0649B, 기존 5개 이후 빠진 6번째 블록)
+    (0x0649B, _SPEED_TRAINER_DESC, 'multiline'),
+    # 트레이너 단기 대화 20B 블록 (훈련 결과 멘트)
+    (0x051F7, "\x03더연습해야합니다",     'multiline'),
+    (0x0520C, _PRIZE_100K,                'multiline'),
+    (0x05221, "\x03다시연습합니다",       'multiline'),
+    (0x0526D, "\x03더연습해야합니다",     'multiline'),
+    (0x05282, _PRIZE_100K,                'multiline'),
+    (0x05297, "\x03다시연습합니다",       'multiline'),
+    (0x052AC, _PRIZE_50K,                 'multiline'),
+    (0x052E6, "\x033관입니다대단합니다",  'multiline'),
+    (0x05311, "\x03대단합니다",           'multiline'),
+    (0x05326, "\x03아주대단합니다",       'multiline'),
+    # 스태미나 회복 텍스트 (0x0688F 블록 내 텍스트 부분)
+    (0x068C2, _STAMINA_RECOVERY,          'multiline'),
     # 트레이너 표시 블록 0x0660E: 위치/타일 쌍(0x66→0x20) + 트레이너 이름
     # 0x66 타일이 뱅크8 한글 타일(림)로 매핑되므로 0x20(공백)으로 교체
     # 0x0661A 서브패치를 덮어씀 (PATCH_TABLE 순서상 이후에 실행)
